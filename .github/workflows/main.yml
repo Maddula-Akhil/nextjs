@@ -1,0 +1,79 @@
+# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
+
+name: Build and Deploy Next.js app to ECS
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [16.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: nextjs
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      
+    - name: Amazon ECS "Render Task Definition" Action
+      id: task-def
+      # You may pin to the exact commit or the version.
+      # uses: aws-actions/amazon-ecs-render-task-definition@374ee96751fffe528c09b5f427848da60469bb55
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        # The path to the ECS task definition JSON file
+        task-definition: task-definition.json
+        # The name of the container defined in the containerDefinitions section of the ECS task definition
+        container-name: nextjs-container
+        # The URI of the container image to insert into the ECS task definition
+        image: ${{ steps.build-image.outputs.image }}
+          
+    - name: Amazon ECS "Deploy Task Definition and Run Task" Action
+      # You may pin to the exact commit or the version.
+      # uses: robbie-unlikelyai/amazon-ecs-run-task@925c70f7e567333a7669770478cba77ecd5acec8
+      uses: robbie-unlikelyai/amazon-ecs-run-task@v2
+      with:
+        # The name of ECS task definition
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        # The name of the ECS cluster. Will default to the 'default' cluster
+        cluster: nextjs-cluster
+        # The count of tasks to run. Will default to the 1
+        count: 1
+        # The value of the task started-by
+        started-by: github-actions-${{ github.actor }}
+        # The subnet to run the task in
+        subnet: subnet-0cfa5ed0e04c8d43d
+        # The security ground to run the task with
+        security-group: sg-0dc92340a3450bec5
