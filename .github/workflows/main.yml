@@ -83,5 +83,5 @@ jobs:
       with:
         task-definition: ${{ steps.task-def.outputs.task-definition }}
         service: nextjs-service
-        cluster: nextjs-cluster
+        cluster: spring-next-cluster
         wait-for-service-stability: true
